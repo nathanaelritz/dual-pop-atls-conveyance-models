@@ -30,12 +30,12 @@ An ephemeral KEM Key (`EKK`) Proof-of-Possession mechanism provides compound-aut
 | Verification Lifecycle & Attestation Typology | Connection Signing Key (`CSK`/`LTK`) | Ephemeral KEM Key (`EKK`) | Attestation Environment Key (`AEK`/`AK`) |
 | --- | --- | --- | --- |
 | **Background-Check** |  |  |  |
-| ↳ Intra-handshake | 🟢 | 🟢 | 🟢 |
-| ↳ Hybrid Post-handshake | 🟢 | 🟢 | 🟢 |
+| ↳ [Intra-handshake](https://github.com/nathanaelritz/dual-pop-atls-conveyance-models/tree/main/models/intra/intra-background-check) | 🟢 | 🟢 | 🟢 |
+| ↳ [Hybrid Post-handshake](https://github.com/nathanaelritz/dual-pop-atls-conveyance-models/tree/main/models/post/hybrid-passport-cache-background-check) | 🟢 | 🟢 | 🟢 |
 | ↳ *(Prior Art)* | 🟢 | ⚪ | ⚪ |
 | **Passport** |  |  |  |
-| ↳ Intra-Handshake | 🟢 | 🟢 | ⚪ |
-| ↳ Post-Handshake only | 🟢 | 🟢 | ⚪ |
+| ↳ [Intra-Handshake](https://github.com/nathanaelritz/dual-pop-atls-conveyance-models/tree/main/models/intra/intra-passport) | 🟢 | 🟢 | ⚪ |
+| ↳ [Post-Handshake only](https://github.com/nathanaelritz/dual-pop-atls-conveyance-models/tree/main/models/post/post-passport-no-cache) | 🟢 | 🟢 | ⚪ |
 | ↳ *(Prior Art)* | 🟢 | ⚪ | ⚪ |
 
 ### EKK compound authentication mechanism
@@ -80,8 +80,8 @@ Thank you to all involved authors and researchers!
 
 ## Copyright and License
 
-Copyright 2026 Muhammad Usama Sardar.
-
+Copyright 2017 Bhargavan et al.<br>
+Copyright 2026 Sardar et al.<br>
 Copyright 2026 Nathanael Ritz.
 
 Licensed under the Apache License, Version 2.0 (the "License");
