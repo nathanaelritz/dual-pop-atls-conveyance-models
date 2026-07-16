@@ -1,0 +1,201 @@
+(* 
+Copyright 2017 Bhargavan et al.
+Copyright 2026 Sardar et al.
+Copyright 2026 Nathanael Ritz.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*)
+
+(* Run as follows with subfolder <traces>:
+proverif205 -lib tls-lib-only.pvl -html traces tls13-multiagent.pv 2>&1 | tee log.txt
+*)
+
+(* 
+Summary: 
+  Server machine's identity: ID_S associated with pubLTK (never leaked, pre-trusted/HSM-provisioned)
+  Tenant/VM identity the Client actually talks to: VM_S, associated with pubCSK
+  General organization for modeling: (VM_S,pubLTK,pubAEK,pubCSK)
+
+Details:
+  Each physical server machine is identified by ID_S and holds one privLTK.
+  Each machine can host multiple tenants/VMs, each with its own VM_S and its own
+  privCSK. LTK never signs anything except the one-time delegation to a VM's CSK:
+  ltk_dc = sign(privLTK, (VM_S, pubCSK)).
+
+We want to model that some server machines may be compromised while others remain secure.
+The compromise of a server machine is modelled by leaking privAEK (per-machine attestation
+key) — LTK itself is assumed never to leak.
+*)
+
+(* Generation of agents and keys *)
+(* All parameters for Server side *)
+(*    agent_keys(ID_S    ,privAEK  ,pubAEK  ,privCSK ,pubCSK ,privEKK ,pubEKK) *)
+table agent_keys(identity,privkey,pubkey,privkey,pubkey,privkey,pubkey).
+
+(*    trust_store(ID_S    ,privLTK,pubLTK,server_cert). *)
+table trust_store(identity,privkey,pubkey,bitstring).
+
+(*    cvm_trust_store(ID_S    ,VM_S    ,privCSK,pubCSK,ltk_dc,cached_ar) *)
+table cvm_trust_store(identity,identity,privkey,pubkey,bitstring,bitstring).
+
+let gen_tee_data (privCA:privkey) = 
+  (* Imagine the following as generating the data of a single server machine (single agent)
+  and the replication then produces multiple server machines (multi-agent) *)
+
+  new privAEK: privkey;  (* attestation key for signing evidence *)
+  let pubAEK = pk(privAEK) in
+  out(io,pubAEK); 
+
+  (* Server side *)
+  new ID_S:identity;  (* long-term identity of the server, e.g., FQDN *)
+  out(io,ID_S);  (* Identity is public *)
+
+  (* Private keys in the protocol *)
+  new privLTK: privkey;  (* Long-term Key of Attester *)
+  let pubLTK = pk(privLTK) in
+  out(io,pubLTK);        (* public keys should be available to attacker *)
+
+  (* WebPKI cert binds ID_S to pubLTK — required by handshake.pvl's Client, which
+  validates verify(pubCA,(ID_S,pubLTK),server_cert) *)
+  let server_cert = sign(privCA,(ID_S,pubLTK)) in
+  out(io, server_cert);
+  insert trust_store(ID_S,privLTK,pubLTK,server_cert);
+
+  (!(
+
+    (* This replication allows to model multiple VMs on the same physical machine
+      which is typical in cloud scenarios. *)
+    new privCSK: privkey;  (* VM key for TLS *)
+    let pubCSK = pk(privCSK) in
+    out(io,pubCSK);  
+
+    (* EKK keypair, minted once per VM *)
+    new privEKK: privkey;
+    let pubEKK = pk(privEKK) in
+    out(io,pubEKK);
+
+    (* Record in the table *)
+    insert agent_keys(ID_S,privAEK,pubAEK,privCSK,pubCSK,privEKK,pubEKK)
+  ))
+.
+
+let gen_vm_identity_docs(privARK:privkey,pubARK:pubkey) =
+
+  (* Server side *)
+  new VM_S:identity;  (* PKI identity of the cVM, e.g., FQDN — this is what the Client actually talks to *)
+  out(io,VM_S);  (* Identity is public *)
+
+  (* Pull pubLTK from the trust store alongside ID_S *)
+  get trust_store(ID_S,privLTK,pubLTK,_) in
+
+  (* Pull pubCSK from agent_keys *)
+  get agent_keys(=ID_S,_,pubAEK,privCSK,pubCSK,_,pubEKK) in
+
+  (* RFC 9345 §4 Delegated Credential: LTK delegates TLS signing authority
+  to TEE-bound privCSK (ephemeral identity signing key), bound to this specific VM_S.
+  This is the one and only thing privLTK is ever used for. *)
+  let ltk_dc = sign(privLTK,(VM_S,pubCSK)) in
+
+  (* Construct the Cached AR claims tuple *)
+  let ar_claims = (VM_S, pubCSK, pubAEK, pubEKK) in
+  let AR_sig = sign(privARK, ar_claims) in
+  let cached_AR = (ar_claims, AR_sig) in
+
+  out(io, (ltk_dc,cached_AR));
+  insert cvm_trust_store(ID_S,VM_S,privCSK,pubCSK,ltk_dc,cached_AR)
+.
+
+
+let run_Client(pubARK:pubkey) =
+  (* Intuitively, the following models a single client (single agent) 
+  and the replication takes care of multiple clients (multi agent) *)
+  new ID_C:identity;  (* long-term identity of the client *)
+  (* Choose a VM (potentially on a compromised machine) to communicate with. *)
+  (!
+  (
+    (* pubLTK is pinned/pre-trusted for this VM_S — the client already knows it ahead of time,
+    it isn't accepted fresh off the wire (see Client's Cert(=pubLTK,...) pattern match) *)
+    get trust_store(ID_S,_,pubLTK,_) in
+
+    (* VM_S (=hostname/FQDN/SAN) is known to the client, e.g., the desired website it wants to connect. *)
+    get cvm_trust_store(=ID_S,VM_S,_,_,_,cached_AR) in
+
+    (* The following replication models multiple sessions of client with these parameters *)
+    !Client(ID_C, VM_S, pubARK, pubLTK, cached_AR)
+  ))
+.
+
+let run_Server() =
+  (* Intuitively, this models a single server and the replication takes care of multiple servers *)
+  get cvm_trust_store(ID_S,VM_S,privCSK,pubCSK,ltk_dc,cached_AR) in
+
+  get trust_store(=ID_S,_,pubLTK,_) in
+
+  get agent_keys(=ID_S,privAEK,pubAEK,=privCSK,=pubCSK,privEKK,pubEKK) in
+
+  (* The following replication models multiple sessions of server with these parameters *)
+  !Server(VM_S,pubLTK,privAEK,privCSK,privEKK,ltk_dc,cached_AR)
+.
+
+(* Mark the event when the keys of a specific machine are leaked
+i.e., not all server machines are compromised at the same time *)
+let LCSK =
+  get agent_keys(_,_,_,privCSK,pubCSK,_,_) in   
+  event LeakedCSK(pubCSK);  (* mark the leakage of TLS Signing Key *)
+  out(io, privCSK)
+.
+
+let LAK =
+  get agent_keys(ID_S,privAEK,pubAEK,privCSK,pubCSK,_,_) in
+  get trust_store(=ID_S,privLTK,pubLTK,_) in  (* retrieve the LTK matching the ID *)
+
+  event LeakedAEK(pubAEK);  (* mark the leakage of AK *)  
+  event LeakedAEK2(ID_S,pubLTK,pubAEK);  (* mark the leakage of AK with additional parameters *)
+  out(io, privAEK)
+.
+
+let LEKK =
+  get agent_keys(_,_,_,_,_,privEKK,pubEKK) in
+  event LeakedEKK(pubEKK);  (* mark the leakage of EKK *)
+  out(io, privEKK)
+.
+
+(*
+let LLTK =
+  get trust_store(_,privLTK,pubLTK) in  (* retrieve the LTK matching the ID *)
+  event LeakedLTK(pubLTK);  (* mark the leakage of LTK *)  
+  out(io, privLTK)
+.
+*)
+
+(* set traceDisplay = long. Display full trace *)
+(* set verboseClauses = short. *)
+(* main system *)
+(* process 0 *)
+process
+  (* Web PKI CA *)
+  new privCA:privkey; 
+  let pubCA = pk(privCA) in 
+  out(io,pubCA);
+
+  (* Verifier Attestion Result Key *)
+  new privARK:privkey;
+  let pubARK = pk(privARK) in
+  out(io,pubARK);
+
+    !(gen_tee_data(privCA)) | !(gen_vm_identity_docs(privARK,pubARK))
+  | !(run_Client(pubARK)) | !(run_Server())
+  | !(LCSK)
+  | !(LAK)
+  | !(LEKK)
+  (* | !(LLTK) *) (* Assume HSM secure — LTK is never leaked *)
