@@ -11,7 +11,7 @@ The **[SEAT WG Charter](https://datatracker.ietf.org/doc/charter-ietf-seat/)** e
 
 Previous approaches hashed the connection key directly into the hardware quote, creating a static binding without integration of live session material. If the connection key leaked, an attacker could spoof the session entirely, regardless of the attestation key's integrity. To resolve this vulnerability, these models introduce an Ephemeral KEM Key (EKK) challenge-response that dynamically binds the attestation to the live handshake transcript. This approach demonstrates compound and injective agreement (`ClientReceivesAppData` / `ServerSendsAppData`, `inj-event`) all the way to the application-data transport stage, providing insight beyond the end of the initial TLS handshake.
 
-> **This is a work in progress,** [released under the Apache 2.0 license](https://github.com/nathanaelritz/dual-pop-atls-conveyance-models/edit/main/README.md#copyright-and-license).
+> **This is a work in progress,** [released under the Apache 2.0 license](https://github.com/nathanaelritz/dual-pop-atls-conveyance-models/tree/main#copyright-and-license).
 > 
 > *Real-world implementation and ongoing refinements to these approaches are expected to change over time.*
 
